@@ -1,0 +1,20 @@
+{
+    "python.autoComplete.extraPaths": [
+        "/home/ylubt2204/tomato_ws/install/quadropted_msgs/local/lib/python3.10/dist-packages",
+        "/home/ylubt2204/tomato_ws/install/go2_keyboard_control/lib/python3.10/site-packages",
+        "/home/ylubt2204/project/unitree_ros2/cyclonedds_ws/install/unitree_hg/local/lib/python3.10/dist-packages",
+        "/home/ylubt2204/project/unitree_ros2/cyclonedds_ws/install/unitree_go/local/lib/python3.10/dist-packages",
+        "/home/ylubt2204/project/unitree_ros2/cyclonedds_ws/install/unitree_api/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ],
+    "python.analysis.extraPaths": [
+        "/home/ylubt2204/tomato_ws/install/quadropted_msgs/local/lib/python3.10/dist-packages",
+        "/home/ylubt2204/tomato_ws/install/go2_keyboard_control/lib/python3.10/site-packages",
+        "/home/ylubt2204/project/unitree_ros2/cyclonedds_ws/install/unitree_hg/local/lib/python3.10/dist-packages",
+        "/home/ylubt2204/project/unitree_ros2/cyclonedds_ws/install/unitree_go/local/lib/python3.10/dist-packages",
+        "/home/ylubt2204/project/unitree_ros2/cyclonedds_ws/install/unitree_api/local/lib/python3.10/dist-packages",
+        "/opt/ros/humble/lib/python3.10/site-packages",
+        "/opt/ros/humble/local/lib/python3.10/dist-packages"
+    ]
+}
