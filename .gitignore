@@ -1,0 +1,25 @@
+# 排除 build install log 目录
+build/
+install/
+log/
+
+# IDE & AI 配置目录
+.vscode/
+.claude/
+
+# 源码备份
+src_backup/
+
+# 所有md文件，但是保留根目录README.md
+*.md
+!README.md
+
+# zip压缩包
+*.zip
+
+# 保留允许的文件类型：.sh .py .sdf 等场景文件，src目录全部保留
+# 下面这条是兜底：不要忽略src里任何东西，不要忽略sh py sdf
+!*.sh
+!*.py
+!*.sdf
+!src/**

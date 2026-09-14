@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<!--
+  中文说明：此文件仅作占位说明。TomatoBot 的唯一真源是
+  xacro/tomato_bot.xacro。spawn_tomato_bot.launch.py 通过 xacro 生成
+  robot_description，请勿直接依赖本 URDF。
+-->
+<robot name="tomato_bot">
+  <!-- 请使用: xacro $(find tomato_bot_description)/xacro/tomato_bot.xacro -->
+</robot>

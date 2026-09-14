@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypesets="g"?>
+<package format="3">
+  <name>tomato_farm_vln_bringup</name>
+  <version>0.1.0</version>
+  <description>Launch package for StreamVLN navigation in Gazebo tomato farm</description>
+  <maintainer email="ylubt2204@example.com">ylubt2204</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>gazebo_ros</exec_depend>
+  <exec_depend>go2_description</exec_depend>
+  <exec_depend>tomato_farm_simulator</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>joint_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
