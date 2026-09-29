@@ -21,7 +21,7 @@ class DiffDriveController(Node):
 
         # 参数
         self.wheel_radius = 0.05  # 轮半径 (m)
-        self.wheel_separation = 0.4  # 轮距 (m)
+        self.wheel_separation = 0.32  # 轮距 (m)，与 base_size.yaml 同步
         self.max_wheel_velocity = 1.0  # 最大轮速度 (rad/s)
         self.cmd_vel_topic = '/cmd_vel'
         self.joint_state_topic = '/joint_states'

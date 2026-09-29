@@ -1,0 +1,16 @@
+# 中文说明：TomatoBot 底座尺寸配置（唯一可调真源）。
+# 修改后：若改的是 src，需 colcon build --packages-select tomato_bot_description
+#         并 source install/setup.bash；也可直接改 install/.../config/base_size.yaml 后重启仿真。
+# 生效方式：重启仿真 / 重新 spawn（已生成的模型不会热更新）。
+#
+# 新旧对照（2026-09-15 防卡脚）：
+#   base_x:            旧 0.40 → 新 0.32  （车身长度，m）
+#   base_y:            旧 0.36 → 新 0.28  （车身宽度，m；卡脚主因）
+#   base_z:            旧 0.18 → 新 0.18  （车身高度，不变）
+#   wheel_separation:  旧 0.40 → 新 0.32  （轮距，随宽缩，两侧约外露 2cm）
+# 回滚：改回 0.40 / 0.36 / 0.18 / 0.40 后重启即可。
+
+base_x: 0.32
+base_y: 0.18
+base_z: 0.18
+wheel_separation: 0.22

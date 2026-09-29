@@ -31,5 +31,22 @@
 - 前置与 `/cmd_vel` 约定同 PointGoal
 - 启动命令：./run_navdp_imggoal_client.sh --goal_image docs/imgs/goal1.png --port 8888 --speed 0.4
 
+## NavDP NoGoal 客户端
+- 节点：`ros2 run tomato_bot_controller navdp_nogoal_client --`
+- 便捷脚本：`./run_navdp_nogoal_client.sh [--port 8888] [--speed 0.4]`
+- 无具体目标：仅把当前 RGB-D 发给 NavDP `/nogoal_step`，按返回轨迹做探索/行进
+- 无自动到达停车；Ctrl+C 停止；未开始导航前不发 `/cmd_vel`
+- 前置：`./run_tomato_bot_test.sh` 已启动仿真，且 NavDP server 已在端口（默认 8888）运行
+- 联调时不要同时开 `keyboard_control`，避免抢占 `/cmd_vel`
+
+## NavDP MixGoal 客户端
+- 节点：`ros2 run tomato_bot_controller navdp_mixgoal_client -- --goal_x <x> --goal_y <y> [--goal_image <path>]`
+- 便捷脚本：`./run_navdp_mixgoal_client.sh --goal_x <x> --goal_y <y> [--goal_image docs/imgs/goal1.png]`
+- 混合目标：同时把相对点坐标（Point Goal）与目标图（Image Goal）发给 `/navdp_step_ip_mixgoal`
+- 目标图默认目录：`docs/imgs/`；启动脚本会列出可选图片，换图用 `--goal_image`
+- 到达判定：与服务端一致——`all_values.max()` 连续 `--stop_hits`（默认 3）次低于 `--stop_threshold`（默认 -3.0）后停车
+- 前置与 `/cmd_vel` 约定同 PointGoal / ImageGoal
+- 启动命令：`./run_navdp_mixgoal_client.sh --goal_x 4.0 --goal_y 1.5 --goal_image docs/imgs/goal1.png --port 8888 --speed 0.4`
+
 ## 限制
 - 不允许改navdp的server端的代码

@@ -10,7 +10,10 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        ('share/' + package_name + '/config', ['config/tomato_bot_rviz.rviz']),
+        ('share/' + package_name + '/config', [
+            'config/tomato_bot_rviz.rviz',
+            'config/safe_nav_defaults.yaml',
+        ]),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -28,6 +31,8 @@ setup(
             'keyboard_control = tomato_bot_controller.keyboard_control:main',
             'navdp_pointgoal_client = tomato_bot_controller.navdp_pointgoal_client:main',
             'navdp_imggoal_client = tomato_bot_controller.navdp_imggoal_client:main',
+            'navdp_nogoal_client = tomato_bot_controller.navdp_nogoal_client:main',
+            'navdp_mixgoal_client = tomato_bot_controller.navdp_mixgoal_client:main',
         ],
     },
 )

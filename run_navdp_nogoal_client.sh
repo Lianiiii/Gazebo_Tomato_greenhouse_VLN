@@ -1,12 +1,9 @@
 #!/usr/bin/env bash
-# 中文说明：在 conda navdp 环境下启动 NavDP PointGoal 客户端。
+# 中文说明：在 conda navdp 环境下启动 NavDP NoGoal 客户端（无目标探索）。
 # 前置：已运行 ./run_tomato_bot_test.sh，且 NavDP server 已在对应端口启动。
 # 用法：
-#   ./run_navdp_pointgoal_client.sh --goal_x 4.0 --goal_y 1.5
-#   ./run_navdp_pointgoal_client.sh --goal_x 4.0 --goal_y 1.5 --port 8888 --speed 0.4
-#   ./run_navdp_pointgoal_client.sh --goal_x 4.0 --goal_y 1.5 --safe_mode fused \
-#       --navdp_root /home/ylubt2204/agri_navdp/NavDP
-# Phase2：--safe_mode {raw,critic,clearance,fused}；其余安全参数见客户端 --help
+#   ./run_navdp_nogoal_client.sh
+#   ./run_navdp_nogoal_client.sh --port 8888 --speed 0.4
 
 set -e
 
@@ -17,11 +14,6 @@ RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
 log_info()  { echo -e "${GREEN}[INFO]${NC}  $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
-
-if [ "$#" -lt 1 ]; then
-  echo "用法: $0 --goal_x <x> --goal_y <y> [--port 8888] [--speed 0.5] [--arrive_dist 1.0]"
-  exit 1
-fi
 
 # 激活 conda navdp（兼容 miniconda / anaconda）
 if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
@@ -62,6 +54,6 @@ source "/opt/ros/${ROS_DISTRO}/setup.bash"
 source "${SCRIPT_DIR}/install/setup.bash"
 export RMW_IMPLEMENTATION="${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
 
-log_info "启动 navdp_pointgoal_client ..."
+log_info "启动 navdp_nogoal_client（无目标探索）..."
 log_warn "请勿同时运行 keyboard_control，避免抢占 /cmd_vel"
-exec ros2 run tomato_bot_controller navdp_pointgoal_client -- "$@"
+exec ros2 run tomato_bot_controller navdp_nogoal_client -- "$@"

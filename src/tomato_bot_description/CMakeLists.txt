@@ -10,11 +10,12 @@ find_package(ament_cmake REQUIRED)
 find_package(gazebo_ros REQUIRED)
 find_package(xacro REQUIRED)
 
-# Install URDF files
+# Install URDF / xacro / launch / config
 install(DIRECTORY
   launch
   urdf
   xacro
+  config
   DESTINATION share/${PROJECT_NAME}
 )
 

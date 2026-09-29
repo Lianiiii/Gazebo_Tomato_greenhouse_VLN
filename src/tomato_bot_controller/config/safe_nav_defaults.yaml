@@ -1,0 +1,34 @@
+# 中文说明：C1/C2 安全导航默认阈值（tomato_bot_controller）。
+# Phase1 使用 BEV / clearance 相关项；Phase2 重排权重与 fallback 与 CLI 硬编码同源。
+# 注意：PointGoal 客户端运行时不读本文件，改默认请同步改 argparse default。
+# 改后需 colcon build --packages-select tomato_bot_controller && source install/setup.bash。
+
+# BEV 高度带（相机水平系 Z_up = -y_optical），默认压低以检出大棚低矮 metal
+bev_z_min: 0.05
+bev_z_max: 1.2
+bev_res: 0.05
+# 固定局部窗口：前方 [0, x_max]，侧向 [-y_half, y_half]
+bev_x_max: 4.0
+bev_y_half: 2.0
+
+# 足迹外扩与 hard-reject 阈值
+inflate: 0.05
+clearance_min: 0.16
+
+# 车体默认（与 base_size.yaml live 值对齐；可由 CLI 覆盖）
+robot_base_x: 0.32
+robot_base_y: 0.18
+wheel_separation: 0.22
+camera_offset_x: 0.12
+camera_offset_y: 0.0
+camera_offset_z: 0.64
+
+# Phase2 重排（与 CLI 默认同源；节点不运行时加载）
+safe_mode: raw
+alpha: 0.5
+beta: 0.5
+fallback_v_scale: 0.3
+fallback_clearance_eps: 0.02
+fallback_w: 0.4
+clearance_horizon: 1.5  # clearance 只评估近场，远端不参与 hard reject
+# 客户端粘滞旋转：无 survivor 时锁定同向；有 survivor 立刻解除跟轨（节点内状态，非本 yaml 开关）

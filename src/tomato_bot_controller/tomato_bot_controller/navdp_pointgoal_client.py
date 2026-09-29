@@ -1,6 +1,10 @@
 # 中文说明：NavDP PointGoal ROS2 客户端。
 # 从 TomatoBot 取 RGB-D 与里程计，调用 NavDP server 的 /pointgoal_step，
 # 再用官方风格 MPC 跟踪返回轨迹，发布差速速度指令。
+# Phase2：可选 C1 安全重排（--safe_mode），用客户端 raw depth 对 16 条候选
+# 做左右轮迹 clearance 硬拒绝 + soft fuse，替换盲选 top-1。
+# Phase2 debug：全拒时粘滞同向旋转（BEV 空旷度 + goal 侧定符号），
+# 有 survivor 立刻解除 sticky 跟轨前进，避免来回摆/转过头。
 #
 # ROS 接口：
 #   订阅 /camera/image_raw (sensor_msgs/Image)  【兼容别名 /camera/color/image_raw】
@@ -13,6 +17,7 @@
 #   POST localhost:{port}/pointgoal_step
 
 import argparse
+import csv
 import math
 import os
 import sys
@@ -29,6 +34,8 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, Image
 
 from tomato_bot_controller.mpc_controller import MPC_Controller
+from tomato_bot_controller.robot_geometry import RobotGeom
+from tomato_bot_controller.safe_traj_rerank import rerank_trajectories
 
 
 # xacro 中 camera_link 相对 base_link 的固定外参（米）
@@ -128,6 +135,55 @@ class NavDPPointGoalClient(Node):
         self._last_cmd = Twist()  # 最近一次有效速度，用于平滑续发
         self._has_cmd = False
         self._navigating = False  # 仅在真正开始导航后才占用 /cmd_vel
+        self._last_baseline_log_t = 0.0
+        self._last_safe_log_t = 0.0
+        self._override_cmd = None  # Phase2 fallback 原地旋转时覆盖 MPC
+        # 粘滞旋转：无 survivor 时锁定同向；有 survivor 立刻解除跟轨，避免来回摆/转过头
+        self._rotate_sticky = False
+        self._rotate_sign = 1
+        self.safe_mode = str(getattr(args, 'safe_mode', 'raw') or 'raw').strip().lower()
+        self.clearance_min = float(getattr(args, 'clearance_min', 0.16))
+        self.alpha = float(getattr(args, 'alpha', 0.5))
+        self.beta = float(getattr(args, 'beta', 0.5))
+        self.bev_z_min = float(getattr(args, 'bev_z_min', 0.05))
+        self.bev_z_max = float(getattr(args, 'bev_z_max', 1.2))
+        self.bev_res = float(getattr(args, 'bev_res', 0.05))
+        self.bev_x_max = float(getattr(args, 'bev_x_max', 4.0))
+        self.bev_y_half = float(getattr(args, 'bev_y_half', 2.0))
+        self.fallback_v_scale = float(getattr(args, 'fallback_v_scale', 0.3))
+        self.fallback_clearance_eps = float(getattr(args, 'fallback_clearance_eps', 0.02))
+        self.fallback_w = float(getattr(args, 'fallback_w', 0.4))
+        self.clearance_horizon = float(getattr(args, 'clearance_horizon', 1.5))
+        self._robot_geom = RobotGeom.from_defaults(
+            base_x=float(getattr(args, 'robot_base_x', 0.32)),
+            base_y=float(getattr(args, 'robot_base_y', 0.18)),
+            wheel_separation=float(getattr(args, 'wheel_separation', 0.22)),
+            inflate=float(getattr(args, 'inflate', 0.05)),
+            camera_offset_xyz=(CAMERA_OFFSET_X, CAMERA_OFFSET_Y, CAMERA_OFFSET_Z),
+        )
+        self._baseline_csv_path = str(getattr(args, 'baseline_csv', '') or '').strip()
+        self._baseline_csv_lock = threading.Lock()
+        if self._baseline_csv_path:
+            csv_dir = os.path.dirname(os.path.abspath(self._baseline_csv_path))
+            if csv_dir:
+                os.makedirs(csv_dir, exist_ok=True)
+            write_header = not os.path.exists(self._baseline_csv_path) or (
+                os.path.getsize(self._baseline_csv_path) == 0
+            )
+            with open(self._baseline_csv_path, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                if write_header:
+                    writer.writerow(
+                        [
+                            't',
+                            'latency',
+                            'critic_argmax',
+                            'all_traj_shape',
+                            'all_values_shape',
+                            'max_critic',
+                            'dist',
+                        ]
+                    )
 
         self.rgb_topic = args.rgb_topic
         self.depth_topic = args.depth_topic
@@ -152,8 +208,16 @@ class NavDPPointGoalClient(Node):
             f'话题: rgb={self.rgb_topic}, depth={self.depth_topic}, info={self.camera_info_topic}'
         )
         self.get_logger().info(
+            f'C1 safe_mode={self.safe_mode}, clearance_min={self.clearance_min:.3f}, '
+            f'alpha={self.alpha:.2f}, beta={self.beta:.2f}, inflate={self._robot_geom.inflate:.3f}'
+        )
+        self.get_logger().info(
             '等待 RGB-D / odom / camera_info ...（未开始导航前不发布 /cmd_vel，避免抢占键盘）'
         )
+        if self._baseline_csv_path:
+            self.get_logger().info(f'Phase0 基线 CSV: {self._baseline_csv_path}')
+        else:
+            self.get_logger().info('Phase0 基线 CSV 未启用（可用 --baseline_csv PATH）')
 
         self._init_timer = self.create_timer(0.5, self._try_init_server)
         self.plan_thread = threading.Thread(target=self._planning_loop, daemon=True)
@@ -271,40 +335,155 @@ class NavDPPointGoalClient(Node):
             try:
                 t0 = time.time()
                 result = self._pointgoal_step(goal_batch, rgb_batch, depth_batch, port=self.port)
+                # 兼容 3/4 元组：只用前三项；控制仍取 top-1
                 traj_cam = result[0]
+                all_traj = np.asarray(result[1])
+                all_values = np.asarray(result[2]).reshape(-1)
                 latency = time.time() - t0
+
+                if all_traj.ndim == 4:
+                    all_traj = all_traj[0]
+                critic_argmax = int(np.argmax(all_values)) if all_values.size > 0 else -1
+                max_critic = float(all_values[critic_argmax]) if critic_argmax >= 0 else float('nan')
+                now = time.time()
+                if now - self._last_baseline_log_t >= 1.0:
+                    self._last_baseline_log_t = now
+                    self.get_logger().info(
+                        f'Phase0 all_* shapes: all_traj={tuple(all_traj.shape)} '
+                        f'all_values={tuple(all_values.shape)} '
+                        f'critic_argmax={critic_argmax} max_critic={max_critic:.3f} '
+                        f'latency={latency:.3f}s'
+                    )
+                if self._baseline_csv_path:
+                    with self._baseline_csv_lock:
+                        with open(self._baseline_csv_path, 'a', newline='', encoding='utf-8') as f:
+                            csv.writer(f).writerow(
+                                [
+                                    f'{now:.3f}',
+                                    f'{latency:.4f}',
+                                    critic_argmax,
+                                    str(tuple(all_traj.shape)),
+                                    str(tuple(all_values.shape)),
+                                    f'{max_critic:.6f}',
+                                    f'{dist:.4f}',
+                                ]
+                            )
 
                 if traj_cam is None or len(traj_cam) == 0:
                     self.get_logger().warn('NavDP 返回空轨迹')
                     time.sleep(0.1)
                     continue
 
-                # batch 维: (1, T, 2+) 或 (T, 2+)
+                # batch 维: (1, T, 2+) 或 (T, 2+)；raw 保持 Phase0 top-1
                 traj = np.asarray(traj_cam)
                 if traj.ndim == 3:
                     traj = traj[0]
+                v_scale = 1.0
+                chosen_idx = critic_argmax
+                chosen_clearance = float('nan')
+                n_reject = 0
+                fallback = False
+
+                if self.safe_mode != 'raw':
+                    if self.intrinsic is None:
+                        self.get_logger().warn('无 intrinsic，跳过 C1 重排，沿用 top-1')
+                    else:
+                        rr = rerank_trajectories(
+                            all_traj,
+                            all_values,
+                            depth,
+                            self.intrinsic,
+                            self._robot_geom,
+                            mode=self.safe_mode,
+                            clearance_min=self.clearance_min,
+                            alpha=self.alpha,
+                            beta=self.beta,
+                            bev_z_min=self.bev_z_min,
+                            bev_z_max=self.bev_z_max,
+                            bev_res=self.bev_res,
+                            bev_x_max=self.bev_x_max,
+                            bev_y_half=self.bev_y_half,
+                            fallback_v_scale=self.fallback_v_scale,
+                            fallback_clearance_eps=self.fallback_clearance_eps,
+                            clearance_horizon=self.clearance_horizon,
+                            goal_y=float(rel_goal[1]),
+                        )
+                        chosen_idx = int(rr.chosen_idx)
+                        chosen_clearance = float(rr.debug.get('chosen_clearance', float('nan')))
+                        n_reject = int(rr.debug.get('n_reject', 0))
+                        n_survivor = int(rr.debug.get('n_survivor', 0))
+                        fallback = bool(rr.debug.get('fallback', False))
+                        v_scale = float(rr.v_max_scale)
+                        want_rotate = bool(rr.debug.get('rotate', False))
+                        suggest_sign = int(rr.debug.get('rotate_sign', 1))
+                        if suggest_sign == 0:
+                            suggest_sign = 1
+
+                        # 有 survivor：立刻解除 sticky，跟可走轨前进（不要转过头）。
+                        # 无 survivor：锁定同向原地转，直到 server 给出可走候选。
+                        if n_survivor > 0 and not want_rotate:
+                            self._rotate_sticky = False
+                        elif want_rotate or n_survivor == 0:
+                            if not self._rotate_sticky:
+                                self._rotate_sticky = True
+                                self._rotate_sign = 1 if suggest_sign >= 0 else -1
+                            w_cmd = float(self.fallback_w) * float(self._rotate_sign)
+                            twist = Twist()
+                            twist.linear.x = 0.0
+                            twist.angular.z = w_cmd
+                            with self._mpc_lock:
+                                self.mpc = None
+                                self._override_cmd = twist
+                                self._last_cmd = twist
+                                self._has_cmd = True
+                            self._navigating = True
+                            if now - self._last_safe_log_t >= 1.0:
+                                self._last_safe_log_t = now
+                                self.get_logger().warn(
+                                    f'C1 fallback rotate: mode={self.safe_mode} '
+                                    f'chosen={chosen_idx} critic_argmax={critic_argmax} '
+                                    f'n_reject={n_reject} n_survivor={n_survivor} '
+                                    f'clearance={chosen_clearance:.3f} '
+                                    f'w={w_cmd:.2f} sign={self._rotate_sign} sticky=1'
+                                )
+                            time.sleep(0.05)
+                            continue
+
+                        traj = np.asarray(rr.traj_cam)
+                        if traj.ndim == 3:
+                            traj = traj[0]
+
                 if traj.shape[0] < 2:
                     self.get_logger().warn(f'轨迹点过少: {traj.shape}')
                     time.sleep(0.1)
                     continue
 
                 traj_world = transform_traj_camera_to_world(traj, cam_x, cam_y, cam_yaw)
+                v_cap = max(0.05, float(self.speed) * float(max(v_scale, 0.0)))
+                # 正常/全拒降速：仅构造 MPC 时注入一次 v_max
                 mpc = MPC_Controller(
                     traj_world,
-                    desired_v=self.speed,
-                    v_max=self.speed,
+                    desired_v=v_cap,
+                    v_max=v_cap,
                     w_max=self.speed,
                 )
                 with self._mpc_lock:
                     self.mpc = mpc
+                    self._override_cmd = None
                 self._navigating = True
 
-                self.get_logger().info(
-                    f'规划完成 latency={latency:.3f}s '
-                    f'pose=({base_x:.2f},{base_y:.2f}) '
-                    f'rel_goal=({rel_goal[0]:.2f},{rel_goal[1]:.2f}) '
-                    f'dist={dist:.2f} traj_n={traj_world.shape[0]}'
-                )
+                if now - self._last_safe_log_t >= 1.0:
+                    self._last_safe_log_t = now
+                    self.get_logger().info(
+                        f'规划完成 latency={latency:.3f}s '
+                        f'pose=({base_x:.2f},{base_y:.2f}) '
+                        f'rel_goal=({rel_goal[0]:.2f},{rel_goal[1]:.2f}) '
+                        f'dist={dist:.2f} traj_n={traj_world.shape[0]} '
+                        f'mode={self.safe_mode} chosen={chosen_idx} '
+                        f'critic_argmax={critic_argmax} n_reject={n_reject} '
+                        f'clearance={chosen_clearance:.3f} v_scale={v_scale:.2f} '
+                        f'fallback={fallback}'
+                    )
             except Exception as exc:
                 self.get_logger().error(f'pointgoal 推理失败: {exc}')
                 time.sleep(0.5)
@@ -347,6 +526,16 @@ class NavDPPointGoalClient(Node):
                 self._navigating = False
                 continue
 
+            # Phase2 fallback 原地旋转：优先覆盖，不求解前进 MPC
+            with self._mpc_lock:
+                override = self._override_cmd
+                if override is not None:
+                    self._last_cmd = override
+                    self._has_cmd = True
+            if override is not None:
+                time.sleep(0.05)
+                continue
+
             cam_x, cam_y, cam_yaw = camera_pose_from_base(base_x, base_y, base_yaw)
             with self._mpc_lock:
                 mpc = self.mpc
@@ -387,6 +576,8 @@ class NavDPPointGoalClient(Node):
         with self._mpc_lock:
             self._last_cmd = stop
             self._has_cmd = False
+            self._override_cmd = None
+        self._rotate_sticky = False
         self.cmd_pub.publish(stop)
 
     def destroy_node(self):
@@ -427,6 +618,51 @@ def build_arg_parser():
         type=str,
         default='/camera/camera_info',
         help='CameraInfo 话题',
+    )
+    parser.add_argument(
+        '--baseline_csv',
+        type=str,
+        default='',
+        help='Phase0 可选：把 all_* 基线日志追加写入该 CSV 路径；空则不写',
+    )
+    # Phase2 C1：默认硬编码对齐 config/safe_nav_defaults.yaml 现值（运行时不读 yaml）
+    parser.add_argument(
+        '--safe_mode',
+        type=str,
+        default='raw',
+        choices=['raw', 'critic', 'clearance', 'fused'],
+        help='C1 重排模式；raw=Phase0 top-1 回归',
+    )
+    parser.add_argument('--clearance_min', type=float, default=0.16, help='轮迹 clearance 硬拒绝阈值(m)')
+    parser.add_argument('--inflate', type=float, default=0.05, help='足迹外扩安全裕度(m)')
+    parser.add_argument('--alpha', type=float, default=0.5, help='fused 中 critic 权重')
+    parser.add_argument('--beta', type=float, default=0.5, help='fused 中 clearance 权重')
+    parser.add_argument('--bev_z_min', type=float, default=0.05, help='BEV 高度带下限(m)')
+    parser.add_argument('--bev_z_max', type=float, default=1.2, help='BEV 高度带上限(m)')
+    parser.add_argument('--bev_res', type=float, default=0.05, help='BEV 分辨率(m)')
+    parser.add_argument('--bev_x_max', type=float, default=4.0, help='BEV 前方窗口(m)')
+    parser.add_argument('--bev_y_half', type=float, default=2.0, help='BEV 侧向半宽(m)')
+    parser.add_argument('--robot_base_x', type=float, default=0.32, help='车体长度(m)')
+    parser.add_argument('--robot_base_y', type=float, default=0.18, help='车体宽度(m)')
+    parser.add_argument('--wheel_separation', type=float, default=0.22, help='轮距(m)')
+    parser.add_argument('--clearance_horizon', type=float, default=1.5, help='clearance 近场评估距离(m)，远端不参与 hard reject')
+    parser.add_argument(
+        '--fallback_v_scale',
+        type=float,
+        default=0.3,
+        help='全拒 fallback 时强制降速比例',
+    )
+    parser.add_argument(
+        '--fallback_clearance_eps',
+        type=float,
+        default=0.02,
+        help='全拒后 clearance 仍低于该值则原地旋转',
+    )
+    parser.add_argument(
+        '--fallback_w',
+        type=float,
+        default=0.4,
+        help='fallback 原地旋转角速度(rad/s)',
     )
     return parser
 

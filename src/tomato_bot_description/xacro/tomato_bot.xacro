@@ -13,13 +13,19 @@
 -->
 <robot name="tomato_bot" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
-  <xacro:property name="base_x" value="0.40"/>
-  <xacro:property name="base_y" value="0.36"/>
-  <xacro:property name="base_z" value="0.18"/>
+  <!-- 底座尺寸可由 launch / base_size.yaml 覆盖；默认已按防卡脚缩小 -->
+  <xacro:arg name="base_x" default="0.32"/>
+  <xacro:arg name="base_y" default="0.28"/>
+  <xacro:arg name="base_z" default="0.18"/>
+  <xacro:arg name="wheel_separation" default="0.32"/>
+
+  <xacro:property name="base_x" value="$(arg base_x)"/>
+  <xacro:property name="base_y" value="$(arg base_y)"/>
+  <xacro:property name="base_z" value="$(arg base_z)"/>
   <xacro:property name="base_mass" value="12.0"/>
   <xacro:property name="wheel_radius" value="0.06"/>
   <xacro:property name="wheel_width" value="0.04"/>
-  <xacro:property name="wheel_separation" value="0.40"/>
+  <xacro:property name="wheel_separation" value="$(arg wheel_separation)"/>
   <xacro:property name="wheel_mass" value="0.8"/>
   <xacro:property name="caster_radius" value="0.03"/>
   <xacro:property name="mast_height" value="0.52"/>
